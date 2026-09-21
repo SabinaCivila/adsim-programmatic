@@ -1,0 +1,21 @@
+{
+  "name": "adsim-programmatic",
+  "version": "1.0.0",
+  "description": "Simulador educativo de publicidad programatica para clase (DSP/SSP/Ad Exchange simplificado)",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.5"
+  }
+}

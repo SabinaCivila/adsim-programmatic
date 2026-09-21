@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AdSim — Pantalla de simulación</title>
+<link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="projector-body">
+<div class="projector-header">
+  <div class="brand"><span class="dot"></span> AdSim <span class="role">Subasta en directo</span></div>
+  <div style="display:flex; align-items:center; gap:22px;">
+    <div id="status-pill" class="status-pill status-lobby">En espera</div>
+    <div id="timer" class="timer">--:--</div>
+  </div>
+</div>
+
+<div id="idle-message" class="empty-state" style="margin:40px;"></div>
+
+<div id="stage-wrap" style="display:none;">
+  <div class="auction-stage" id="auction-stage"></div>
+
+  <div class="projector-ranking">
+    <div class="section-title"><h2>Ranking en directo</h2></div>
+    <div class="grid grid-cols-2" id="projector-ranking-grid"></div>
+  </div>
+</div>
+
+<div class="ticker" id="event-ticker"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/pantalla.js"></script>
+</body>
+</html>

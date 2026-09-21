@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AdSim — Panel del profesor</title>
+<link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> AdSim <span class="role">Profesor</span></div>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <div id="timer" class="timer" style="font-size:18px;">--:--</div>
+    <div id="status-pill" class="status-pill status-lobby">En espera</div>
+  </div>
+</div>
+
+<div class="container">
+
+  <div id="lobby-section"></div>
+
+  <div id="controls-section"></div>
+
+  <div id="events-section"></div>
+
+  <div class="grid grid-cols-2" style="align-items:start;">
+    <div>
+      <div class="section-title"><h2>Ranking provisional</h2></div>
+      <div id="ranking-panel" class="card"></div>
+    </div>
+    <div>
+      <div class="section-title"><h2>Subastas en tiempo real</h2></div>
+      <div id="auction-feed" class="card" style="max-height:420px; overflow:auto;"></div>
+    </div>
+  </div>
+
+  <div class="section-title"><h2>Campañas de todos los equipos</h2></div>
+  <div id="campaigns-panel" class="card"></div>
+
+  <div class="section-title"><h2>Equipos</h2></div>
+  <div id="teams-panel" class="card"></div>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/profesor.js"></script>
+</body>
+</html>

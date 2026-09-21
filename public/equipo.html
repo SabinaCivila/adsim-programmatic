@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AdSim — Panel del equipo</title>
+<link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> AdSim <span class="role" id="team-role-label">Equipo</span></div>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <div id="timer" class="timer" style="font-size:18px;">--:--</div>
+    <div id="status-pill" class="status-pill status-lobby">En espera</div>
+    <button class="btn secondary small" id="switch-team-btn" style="display:none;">Cambiar equipo</button>
+  </div>
+</div>
+
+<div class="container">
+  <div id="team-select-section"></div>
+  <div id="team-dashboard" style="display:none;">
+    <div id="events-banner"></div>
+    <div id="budget-cards" class="grid grid-cols-4"></div>
+
+    <div class="section-title"><h2>Mi ranking</h2></div>
+    <div id="my-rank" class="card"></div>
+
+    <div class="section-title">
+      <h2>Mis campañas</h2>
+      <button class="btn small" id="new-campaign-btn">+ Nueva campaña</button>
+    </div>
+    <div id="campaign-form-holder"></div>
+    <div id="campaign-list"></div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/equipo.js"></script>
+</body>
+</html>
