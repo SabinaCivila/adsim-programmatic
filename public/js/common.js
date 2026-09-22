@@ -23,6 +23,28 @@ function formatMs(ms) {
   return `${m}:${s}`;
 }
 
+// ROAS solo tiene sentido una vez que se ha gastado algo; mostrar "0,00x"
+// para un equipo/campaña que aún no ha pujado se confunde fácilmente con
+// "perdió todo su dinero". Mostramos "—" hasta que haya gasto real.
+function roasLabel(spend, roas) {
+  if (!(spend > 0)) return '—';
+  return `${num(roas)}x`;
+}
+
+// Beneficio/pérdida en euros, con signo explícito para que se lea de un
+// vistazo si la campaña/equipo es rentable o no.
+function profitLabel(revenue, spend) {
+  const profit = (revenue || 0) - (spend || 0);
+  const sign = profit > 0 ? '+' : '';
+  return `${sign}${euros(profit)}`;
+}
+function profitClass(revenue, spend) {
+  const profit = (revenue || 0) - (spend || 0);
+  if (profit > 0) return 'profit-positive';
+  if (profit < 0) return 'profit-negative';
+  return '';
+}
+
 function statusLabel(status) {
   return { lobby: 'En espera', running: 'En curso', paused: 'Pausada', ended: 'Finalizada' }[status] || status;
 }
@@ -49,12 +71,53 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
+// ---------------------------------------------------------------------------
+// renderOnce: pieza central de la gestión de estado de la interfaz.
+//
+// Causa raíz de la pérdida de datos detectada (nombres de campaña que se
+// borran, selects que vuelven a su valor inicial, segmentación que se
+// desmarca): el servidor emite `state:update` a TODOS los clientes cada vez
+// que ocurre CUALQUIER cosa en la partida (otro equipo crea una campaña, el
+// profesor añade un equipo, se resuelve una subasta cada pocos segundos...).
+// Antes, cada `render()` volvía a construir TODO el DOM desde cero
+// (`innerHTML = ''` + reconstrucción), incluidos los formularios que un
+// alumno tenía abiertos y sin guardar en ese preciso instante — así que
+// cualquier evento ajeno borraba lo que esa persona estaba escribiendo.
+//
+// renderOnce reconstruye un contenedor solo cuando cambia su "identidad"
+// (por ejemplo: qué campaña se está editando, o si el formulario de
+// creación está abierto o cerrado). Si la identidad no ha cambiado, el
+// contenedor se deja intacto -aunque haya llegado un `state:update`-, así
+// que lo que el usuario está escribiendo/seleccionando nunca se pierde por
+// una acción de otra persona. Cuando la identidad SÍ cambia (el usuario
+// abre otro formulario, o lo cierra), se reconstruye a propósito.
+function renderOnce(container, key, buildFn) {
+  const keyStr = key == null ? '' : String(key);
+  if (container.dataset.builtKey === keyStr && keyStr !== '') return; // misma identidad: no tocar
+  container.innerHTML = '';
+  container.dataset.builtKey = keyStr;
+  if (key == null) return;
+  container.appendChild(buildFn());
+}
+
 function wrapField(labelText, inputNode) {
   const wrap = el('div');
   wrap.appendChild(el('label', {}, labelText));
   wrap.appendChild(inputNode);
   return wrap;
 }
+
+// Marca de agua discreta, consistente en las tres vistas. No intercepta clics
+// (pointer-events: none) y se ancla en una esquina para no tapar nunca
+// botones, formularios ni gráficos.
+function mountWatermark() {
+  const wm = el('div', {
+    class: 'adsim-watermark',
+    'aria-hidden': 'true',
+  }, 'Sabina Civila');
+  document.body.appendChild(wm);
+}
+document.addEventListener('DOMContentLoaded', mountWatermark);
 
 function toast(message, kind = 'info') {
   let holder = document.getElementById('toast-holder');

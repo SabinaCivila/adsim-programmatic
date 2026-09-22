@@ -32,6 +32,10 @@ function render() {
   updateTimer();
 
   if (myTeamId && !state.teams[myTeamId]) { myTeamId = null; localStorage.removeItem('adsim_team_id'); }
+  // Si el equipo que estábamos editando dejó de existir (p. ej. lo quitó el
+  // profesor), cerramos el formulario en vez de intentar reconstruirlo con
+  // datos que ya no están.
+  if (editingCampaignId && !state.campaigns[editingCampaignId]) editingCampaignId = null;
 
   if (!myTeamId) {
     document.getElementById('team-select-section').style.display = '';
@@ -46,11 +50,18 @@ function render() {
   document.getElementById('switch-team-btn').style.display = '';
   document.getElementById('team-role-label').textContent = state.teams[myTeamId].name;
 
+  // --- Secciones "en vivo": se refrescan siempre, no contienen datos sin guardar del usuario.
   renderEventsBanner();
   renderBudgetCards();
   renderMyRank();
-  renderCampaignForm();
   renderCampaignList();
+
+  // --- Formularios interactivos: solo se (re)construyen cuando cambia SU IDENTIDAD
+  // (se abren, se cierran, o cambian de campaña objetivo) — nunca por un
+  // state:update ajeno. Esto es lo que evita que se pierda lo que el alumno
+  // está escribiendo cuando otro equipo o el profesor hace algo a la vez.
+  renderOnce(document.getElementById('campaign-form-holder'), showingNewCampaignForm ? 'new' : null, () => buildCampaignForm(null));
+  renderOnce(document.getElementById('campaign-edit-holder'), editingCampaignId, () => buildCampaignForm(state.campaigns[editingCampaignId]));
 }
 
 function renderTeamSelect() {
@@ -88,15 +99,15 @@ function renderBudgetCards() {
   container.innerHTML = '';
   const remaining = team.budgetInitial - team.budgetSpent;
   const cards = [
-    ['Presupuesto inicial', euros(team.budgetInitial)],
-    ['Gastado', euros(team.budgetSpent)],
-    ['Restante', euros(remaining)],
-    ['Ingresos simulados', euros(team.revenueSimulated)],
+    ['Presupuesto inicial', euros(team.budgetInitial), ''],
+    ['Gastado', euros(team.budgetSpent), ''],
+    ['Restante', euros(remaining), ''],
+    ['Beneficio / pérdida', profitLabel(team.revenueSimulated, team.budgetSpent), profitClass(team.revenueSimulated, team.budgetSpent)],
   ];
-  cards.forEach(([label, value]) => {
+  cards.forEach(([label, value, cls]) => {
     container.appendChild(el('div', { class: 'card metric-card' }, [
       el('div', { class: 'label' }, label),
-      el('div', { class: 'value' }, value),
+      el('div', { class: `value ${cls}` }, value),
     ]));
   });
 }
@@ -113,7 +124,7 @@ function renderMyRank() {
   container.appendChild(el('div', { style: 'display:flex; justify-content:space-between; align-items:center;' }, [
     el('div', {}, [
       el('div', { style: 'font-size:13px; color:var(--text-dim);' }, `Posición ${pos} de ${state.ranking.length}`),
-      el('div', { style: 'font-size:13px; margin-top:4px;' }, `ROAS ${num(mine.roas)} · CTR ${pct(mine.ctr)} · CPA ${mine.cpa != null ? euros(mine.cpa) : '—'} · ${mine.conversions} conversiones`),
+      el('div', { style: 'font-size:13px; margin-top:4px;' }, `ROAS ${roasLabel(mine.spend, mine.roas)} · CTR ${pct(mine.ctr)} · CPA ${mine.cpa != null ? euros(mine.cpa) : '—'} · ${mine.conversions} conversiones · Beneficio ${profitLabel(mine.revenue, mine.spend)}`),
     ]),
     el('div', { style: 'font-size:30px; font-weight:800;' }, num(mine.score)),
   ]));
@@ -143,7 +154,7 @@ function chipToggle(options, selectedArr) {
 
 function buildCampaignForm(existing) {
   const t = existing ? existing.targeting : { edades: [], ubicaciones: [], dispositivos: [], intereses: [], horarios: [], tiposContenido: [] };
-  const form = el('div', { class: 'card', style: 'margin-bottom:16px;' });
+  const form = el('div', { class: 'card', style: 'margin-bottom:16px; border-color:var(--accent);' });
 
   const nameInput = el('input', { value: existing?.name || '', placeholder: 'Nombre de la campaña' });
   const objetivoSelect = el('select', {}, catalog.OBJETIVOS.map((o) => el('option', { value: o.id }, o.label)));
@@ -160,7 +171,7 @@ function buildCampaignForm(existing) {
   const targetROASInput = el('input', { type: 'number', value: existing?.targetROAS ?? 3, step: '0.1' });
   const creativeQualityInput = el('input', { type: 'range', min: '1', max: '10', value: existing?.creativeQuality ?? 6 });
 
-  form.appendChild(el('h3', {}, existing ? `Editar: ${existing.name}` : 'Nueva campaña'));
+  form.appendChild(el('h3', {}, existing ? `Editando: ${existing.name}` : 'Nueva campaña'));
   form.appendChild(el('div', { class: 'field-row' }, [wrapField('Nombre', nameInput), wrapField('Objetivo', objetivoSelect)]));
   form.appendChild(el('div', { class: 'field-row' }, [wrapField('Formato publicitario', formatoSelect), wrapField('Estrategia de puja', strategySelect)]));
   form.appendChild(el('div', { class: 'field-row' }, [
@@ -229,12 +240,6 @@ function buildCampaignForm(existing) {
   return form;
 }
 
-function renderCampaignForm() {
-  const holder = document.getElementById('campaign-form-holder');
-  holder.innerHTML = '';
-  if (showingNewCampaignForm) holder.appendChild(buildCampaignForm(null));
-}
-
 function renderCampaignList() {
   const container = document.getElementById('campaign-list');
   container.innerHTML = '';
@@ -244,18 +249,14 @@ function renderCampaignList() {
     return;
   }
   campaigns.forEach((c) => {
-    if (editingCampaignId === c.id) {
-      container.appendChild(buildCampaignForm(c));
-      return;
-    }
+    const beingEdited = editingCampaignId === c.id;
     const ctr = c.metrics.impressions > 0 ? c.metrics.clicks / c.metrics.impressions : 0;
     const cpc = c.metrics.clicks > 0 ? c.metrics.spend / c.metrics.clicks : null;
     const cpm = c.metrics.impressions > 0 ? (c.metrics.spend / c.metrics.impressions) * 1000 : 0;
     const cpa = c.metrics.conversions > 0 ? c.metrics.spend / c.metrics.conversions : null;
-    const roas = c.metrics.spend > 0 ? c.metrics.revenue / c.metrics.spend : 0;
     const spentPct = c.budget > 0 ? Math.min(100, (c.metrics.spend / c.budget) * 100) : 0;
 
-    const card = el('div', { class: 'card', style: 'margin-bottom:14px;' });
+    const card = el('div', { class: 'card', style: `margin-bottom:14px; ${beingEdited ? 'border-color:var(--accent);' : ''}` });
     card.appendChild(el('div', { style: 'display:flex; justify-content:space-between; align-items:center;' }, [
       el('div', {}, [
         el('h3', {}, c.name),
@@ -267,18 +268,31 @@ function renderCampaignList() {
     card.appendChild(el('div', { style: 'font-size:12px; color:var(--text-dim);' }, `${euros(c.metrics.spend)} de ${euros(c.budget)} gastado`));
 
     const metricsGrid = el('div', { class: 'grid grid-cols-6', style: 'margin-top:14px;' });
-    [['Impr.', num(c.metrics.impressions)], ['Clics', num(c.metrics.clicks)], ['Conv.', num(c.metrics.conversions)],
-      ['CTR', pct(ctr)], ['CPC', cpc != null ? euros(cpc) : '—'], ['CPM', euros(cpm)],
-      ['CPA', cpa != null ? euros(cpa) : '—'], ['ROAS', num(roas)], ['Ingresos', euros(c.metrics.revenue)]].forEach(([label, value]) => {
+    [
+      ['Impr.', num(c.metrics.impressions), ''],
+      ['Clics', num(c.metrics.clicks), ''],
+      ['Conv.', num(c.metrics.conversions), ''],
+      ['CTR', pct(ctr), ''],
+      ['CPC', cpc != null ? euros(cpc) : '—', ''],
+      ['CPM', euros(cpm), ''],
+      ['CPA', cpa != null ? euros(cpa) : '—', ''],
+      ['ROAS', roasLabel(c.metrics.spend, c.metrics.spend > 0 ? c.metrics.revenue / c.metrics.spend : 0), ''],
+      ['Ingresos', euros(c.metrics.revenue), ''],
+      ['Beneficio', profitLabel(c.metrics.revenue, c.metrics.spend), profitClass(c.metrics.revenue, c.metrics.spend)],
+    ].forEach(([label, value, cls]) => {
       metricsGrid.appendChild(el('div', { class: 'metric-card' }, [
         el('div', { class: 'label' }, label),
-        el('div', { class: 'value', style: 'font-size:17px;' }, value),
+        el('div', { class: `value ${cls}`, style: 'font-size:17px;' }, value),
       ]));
     });
     card.appendChild(metricsGrid);
 
     const actions = el('div', { style: 'display:flex; gap:8px; margin-top:14px;' });
-    actions.appendChild(el('button', { class: 'btn secondary small', onclick: () => { editingCampaignId = c.id; showingNewCampaignForm = false; render(); } }, 'Editar'));
+    actions.appendChild(el('button', {
+      class: 'btn secondary small',
+      disabled: beingEdited,
+      onclick: () => { editingCampaignId = c.id; showingNewCampaignForm = false; render(); },
+    }, beingEdited ? 'Editando ↑' : 'Editar'));
     if (c.status === 'active') {
       actions.appendChild(el('button', { class: 'btn warn small', onclick: () => socket.emit('campaign:update', { campaignId: c.id, status: 'paused' }) }, 'Pausar'));
     } else if (c.status === 'paused') {

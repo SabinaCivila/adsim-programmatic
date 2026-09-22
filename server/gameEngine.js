@@ -71,10 +71,42 @@ class GameEngine {
   }
 
   createGame(config = {}) {
+    // Guard crítico: sin esto, una pestaña de profesor duplicada o
+    // desincronizada (p. ej. tras una reconexión, o un segundo dispositivo
+    // del profesor) puede reenviar "crear partida" mientras hay una partida
+    // en curso y borrar de golpe todos los equipos y campañas de todo el
+    // mundo, sin aviso ni forma de deshacerlo. Reproducido y confirmado
+    // durante la auditoría: ver informe, sección de causas raíz.
+    if (this.state.status === 'running' || this.state.status === 'paused') {
+      throw new Error('No se puede reconfigurar una partida en curso (se perderían equipos y campañas). Usa "Reiniciar partida" si quieres empezar de cero, o espera a que termine.');
+    }
     this.reset();
-    Object.assign(this.state.config, config);
+    this.state.config = this._sanitizeConfig(config);
     this._broadcastState('game:created');
     return this.state;
+  }
+
+  // Evita configuraciones degeneradas (presupuesto 0, duración negativa,
+  // subastas cada 0ms...) que producirían divisiones por cero o partidas
+  // inservibles más adelante en el motor.
+  _sanitizeConfig(config = {}) {
+    const defaults = {
+      initialBudget: 500,
+      durationMs: 20 * 60 * 1000,
+      tickIntervalMs: 6000,
+      scoring: {
+        conversions: 1, roas: 1, ctr: 1, cpaInverse: 1, efficiency: 1, objectiveCompliance: 1,
+      },
+    };
+    const initialBudget = clamp(Number(config.initialBudget) || defaults.initialBudget, 10, 100000);
+    const durationMs = clamp(Number(config.durationMs) || defaults.durationMs, 60 * 1000, 4 * 60 * 60 * 1000);
+    const tickIntervalMs = clamp(Number(config.tickIntervalMs) || defaults.tickIntervalMs, 2000, 60000);
+    const scoring = (config.scoring && typeof config.scoring === 'object')
+      ? { ...defaults.scoring, ...config.scoring }
+      : defaults.scoring;
+    return {
+      initialBudget, durationMs, tickIntervalMs, scoring,
+    };
   }
 
   addTeam(name) {
@@ -381,9 +413,7 @@ class GameEngine {
 
     if (bids.length > 0) {
       const winner = bids[0];
-      const clearingPrice = bids.length > 1
-        ? clamp(+((bids[1].adRank / winner.qualityScore) + 0.01).toFixed(2), reservePrice, winner.bid)
-        : clamp(reservePrice, 0.05, winner.bid);
+      const clearingPrice = GameEngine.resolveClearingPrice(bids, reservePrice);
 
       const campaign = this.state.campaigns[winner.campaignId];
       const team = this.state.teams[winner.teamId];
@@ -392,19 +422,16 @@ class GameEngine {
       campaign.metrics.auctionsWon += 1;
       team.budgetSpent = +(team.budgetSpent + clearingPrice).toFixed(2);
 
-      let clicked = false;
-      let converted = false;
-      let revenue = 0;
-      if (Math.random() < winner.predictedCTR) {
-        clicked = true;
-        campaign.metrics.clicks += 1;
-        if (Math.random() < winner.predictedCVR) {
-          converted = true;
-          revenue = +(segmentBase.revenuePerConversion * (0.8 + Math.random() * 0.4)).toFixed(2);
-          campaign.metrics.conversions += 1;
-          campaign.metrics.revenue = +(campaign.metrics.revenue + revenue).toFixed(2);
-          team.revenueSimulated = +(team.revenueSimulated + revenue).toFixed(2);
-        }
+      const { clicked, converted, revenue } = GameEngine.simulateOutcome(
+        winner.predictedCTR,
+        winner.predictedCVR,
+        segmentBase.revenuePerConversion,
+      );
+      if (clicked) campaign.metrics.clicks += 1;
+      if (converted) {
+        campaign.metrics.conversions += 1;
+        campaign.metrics.revenue = +(campaign.metrics.revenue + revenue).toFixed(2);
+        team.revenueSimulated = +(team.revenueSimulated + revenue).toFixed(2);
       }
 
       if (campaign.metrics.spend >= campaign.budget) campaign.status = 'budget_exhausted';
@@ -439,6 +466,47 @@ class GameEngine {
     this.tickHandle = null;
     this.state.status = 'ended';
     this._broadcastState('game:ended');
+  }
+
+  // ---------- Lógica económica pura (estáticas, sin efectos secundarios) ----------
+  // Se extraen como funciones puras -en vez de dejarlas inline dentro de
+  // _tick()- precisamente para poder probarlas de forma determinista: reciben
+  // un `rng` inyectable (por defecto Math.random) en lugar de generar
+  // aleatoriedad ellas mismas, así los tests pueden fijar la secuencia y
+  // comprobar un resultado exacto en lugar de solo "no lanza error".
+
+  // Subasta de segundo precio: el ganador paga lo mínimo necesario para
+  // superar al segundo mejor ad_rank, nunca más de su propia puja, nunca
+  // menos que el precio de reserva del segmento.
+  static resolveClearingPrice(bidsSortedDesc, reservePrice) {
+    const winner = bidsSortedDesc[0];
+    if (bidsSortedDesc.length > 1) {
+      const second = bidsSortedDesc[1];
+      return clamp(+((second.adRank / winner.qualityScore) + 0.01).toFixed(2), reservePrice, winner.bid);
+    }
+    return clamp(reservePrice, 0.05, winner.bid);
+  }
+
+  // Cadena económica de una impresión ganada:
+  //   ¿clic? -> sorteo con probabilidad predictedCTR
+  //   ¿conversión? (solo si hubo clic) -> sorteo con probabilidad predictedCVR
+  //   ingreso de la conversión -> revenuePerConversion x factor aleatorio [0.8, 1.2]
+  // Es un modelo probabilístico por impresión (no "impresiones x CTR" de
+  // forma determinista): así una misma campaña puede tener sesiones con
+  // mejor o peor suerte, igual que en datos reales de campañas — pero en
+  // agregado, sobre muchas impresiones, converge a las tasas configuradas.
+  static simulateOutcome(predictedCTR, predictedCVR, revenuePerConversion, rng = Math.random) {
+    let clicked = false;
+    let converted = false;
+    let revenue = 0;
+    if (rng() < predictedCTR) {
+      clicked = true;
+      if (rng() < predictedCVR) {
+        converted = true;
+        revenue = +(revenuePerConversion * (0.8 + rng() * 0.4)).toFixed(2);
+      }
+    }
+    return { clicked, converted, revenue };
   }
 
   // ---------- Ranking ----------

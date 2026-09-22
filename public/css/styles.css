@@ -181,3 +181,23 @@ label { font-size: 12.5px; color: var(--text-dim); display: block; margin: 10px 
   border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 26px; width: 200px;
   background: var(--bg-card-solid);
 }
+
+.profit-positive { color: var(--good); }
+.profit-negative { color: var(--danger); }
+
+.adsim-watermark {
+  position: fixed;
+  right: 14px;
+  bottom: 10px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #ffffff40;
+  pointer-events: none;
+  user-select: none;
+  z-index: 5; /* por debajo de toasts y modales, por encima del fondo */
+  font-weight: 600;
+  text-transform: uppercase;
+}
+@media (max-width: 620px) {
+  .adsim-watermark { font-size: 9px; right: 8px; bottom: 4px; }
+}

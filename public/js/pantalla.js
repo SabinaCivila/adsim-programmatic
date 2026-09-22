@@ -101,7 +101,7 @@ function renderRanking() {
         el('div', { class: `rank-pos ${pos <= 3 ? 'top' + pos : ''}`, style: 'font-size:22px;' }, String(pos)),
         el('div', {}, [
           el('div', { style: 'font-weight:700; font-size:16px;' }, t.teamName),
-          el('div', { style: 'color:var(--text-dim); font-size:12px;' }, `ROAS ${num(t.roas)} · ${t.conversions} conv.`),
+          el('div', { style: 'color:var(--text-dim); font-size:12px;' }, `ROAS ${roasLabel(t.spend, t.roas)} · ${t.conversions} conv. · Beneficio ${profitLabel(t.revenue, t.spend)}`),
         ]),
       ]),
       el('div', { style: 'font-size:22px; font-weight:800;' }, num(t.score)),

@@ -28,21 +28,26 @@ function render() {
   document.getElementById('status-pill').className = `status-pill status-${state.status}`;
   updateTimer();
 
-  renderLobby();
+  // --- Formularios interactivos: solo se reconstruyen cuando cambia su identidad
+  // (aquí, cuando cambiamos de fase de partida), nunca por un state:update
+  // ajeno como "otro equipo creó una campaña" o "se resolvió una subasta".
+  // Ver el comentario de renderOnce en common.js para la explicación completa
+  // de qué bug evita esto.
+  renderOnce(document.getElementById('lobby-config-section'), state.status === 'lobby' ? 'config' : null, buildLobbyConfig);
+  renderOnce(document.getElementById('event-controls-section'), (state.status === 'running' || state.status === 'paused') ? 'controls' : null, buildEventControls);
+
+  // --- Secciones en vivo: no contienen texto/selecciones sin guardar, se refrescan siempre.
+  renderLobbyTeams();
   renderControls();
-  renderEvents();
+  renderActiveEvents();
   renderRanking();
   renderAuctionFeed();
   renderCampaigns();
   renderTeams();
 }
 
-// ---------- Lobby: configuración inicial ----------
-function renderLobby() {
-  const container = document.getElementById('lobby-section');
-  if (state.status !== 'lobby') { container.innerHTML = ''; return; }
-
-  container.innerHTML = '';
+// ---------- Lobby: configuración inicial (formulario estable) ----------
+function buildLobbyConfig() {
   const card = el('div', { class: 'card' });
   card.appendChild(el('h3', {}, 'Configurar nueva partida'));
   card.appendChild(el('div', { class: 'field-row' }, [
@@ -78,11 +83,7 @@ function renderLobby() {
     }, 'Crear / reconfigurar partida'),
   ]));
 
-  container.appendChild(card);
-
-  container.appendChild(el('div', { class: 'section-title' }, el('h2', {}, 'Equipos')));
-  const teamCard = el('div', { class: 'card' });
-  const addRow = el('div', { style: 'display:flex; gap:8px; margin-bottom:14px;' }, [
+  card.appendChild(el('div', { style: 'margin-top:26px; display:flex; gap:8px;' }, [
     el('input', { id: 'new-team-name', placeholder: 'Nombre del equipo (ej. Equipo Alfa)' }),
     el('button', {
       class: 'btn secondary',
@@ -92,8 +93,21 @@ function renderLobby() {
         nameInput.value = '';
       },
     }, 'Añadir equipo'),
-  ]);
-  teamCard.appendChild(addRow);
+  ]));
+
+  card.appendChild(el('div', { style: 'margin-top:18px;' }, [
+    el('button', { class: 'btn', onclick: () => socket.emit('profesor:startGame') }, '▶ Iniciar partida'),
+  ]));
+  return card;
+}
+
+// Lista de equipos ya añadidos: se refresca en cada render (no tiene inputs sin guardar).
+function renderLobbyTeams() {
+  const container = document.getElementById('lobby-teams-section');
+  container.innerHTML = '';
+  if (state.status !== 'lobby') return;
+  container.appendChild(el('div', { class: 'section-title' }, el('h2', {}, 'Equipos')));
+  const teamCard = el('div', { class: 'card' });
   const teams = Object.values(state.teams);
   if (teams.length === 0) {
     teamCard.appendChild(el('div', { class: 'empty-state' }, 'Todavía no hay equipos. Añade al menos uno para poder iniciar.'));
@@ -101,25 +115,14 @@ function renderLobby() {
     teams.forEach((t) => {
       teamCard.appendChild(el('div', { style: 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border);' }, [
         el('span', {}, `${t.name} — presupuesto ${euros(t.budgetInitial)}`),
-        el('button', { class: 'btn danger small', onclick: () => socket.emit('profesor:removeTeam', { teamId: t.id }) }, 'Quitar'),
+        el('button', {
+          class: 'btn danger small',
+          onclick: () => { if (confirm(`¿Quitar a ${t.name}? Se perderán sus campañas.`)) socket.emit('profesor:removeTeam', { teamId: t.id }); },
+        }, 'Quitar'),
       ]));
     });
   }
   container.appendChild(teamCard);
-
-  container.appendChild(el('div', { style: 'margin-top:18px;' }, [
-    el('button', {
-      class: 'btn',
-      onclick: () => socket.emit('profesor:startGame'),
-    }, '▶ Iniciar partida'),
-  ]));
-}
-
-function wrapField(labelText, inputNode) {
-  const wrap = el('div');
-  wrap.appendChild(el('label', {}, labelText));
-  wrap.appendChild(inputNode);
-  return wrap;
 }
 
 // ---------- Controles durante la partida ----------
@@ -145,21 +148,12 @@ function renderControls() {
 }
 
 // ---------- Eventos de mercado ----------
-function renderEvents() {
-  const container = document.getElementById('events-section');
-  container.innerHTML = '';
-  if (state.status === 'lobby' || state.status === 'ended') return;
-
-  container.appendChild(el('div', { class: 'section-title' }, el('h2', {}, 'Eventos de mercado')));
+// Controles (selects + botón activar): formulario estable, no se reconstruye
+// mientras el profesor está eligiendo un evento aunque lleguen subastas de fondo.
+function buildEventControls() {
+  const wrap = el('div');
+  wrap.appendChild(el('div', { class: 'section-title' }, el('h2', {}, 'Eventos de mercado')));
   const card = el('div', { class: 'card' });
-
-  if (state.activeEvents.length > 0) {
-    state.activeEvents.forEach((ev) => {
-      const remaining = Math.max(0, ev.expiresAt - Date.now());
-      card.appendChild(el('div', { class: 'event-banner' }, `⚡ ${ev.label} — ${ev.description} (segmento: ${ev.target}, quedan ${formatMs(remaining)})`));
-    });
-  }
-
   const row = el('div', { class: 'field-row', style: 'align-items:end;' });
   const eventSelect = el('select', { id: 'event-select' }, catalog.EVENTOS.map((e) => el('option', { value: e.id }, e.label)));
   const targetSelect = el('select', { id: 'event-target' }, [
@@ -173,8 +167,19 @@ function renderEvents() {
     class: 'btn warn', style: 'margin-top:12px;',
     onclick: () => socket.emit('profesor:triggerEvent', { eventId: eventSelect.value, target: targetSelect.value }),
   }, '⚡ Activar evento'));
+  wrap.appendChild(card);
+  return wrap;
+}
 
-  container.appendChild(card);
+// Banner de eventos activos con cuenta atrás: cambia solo, se refresca cada render.
+function renderActiveEvents() {
+  const container = document.getElementById('event-active-section');
+  container.innerHTML = '';
+  if (state.status === 'lobby' || state.status === 'ended' || state.activeEvents.length === 0) return;
+  state.activeEvents.forEach((ev) => {
+    const remaining = Math.max(0, ev.expiresAt - Date.now());
+    container.appendChild(el('div', { class: 'event-banner' }, `⚡ ${ev.label} — ${ev.description} (segmento: ${ev.target}, quedan ${formatMs(remaining)})`));
+  });
 }
 
 // ---------- Ranking ----------
@@ -191,7 +196,7 @@ function renderRanking() {
       el('div', { class: `rank-pos ${pos <= 3 ? 'top' + pos : ''}` }, String(pos)),
       el('div', {}, [
         el('div', { style: 'font-weight:600;' }, t.teamName),
-        el('div', { style: 'color:var(--text-dim); font-size:12px;' }, `ROAS ${num(t.roas)} · CTR ${pct(t.ctr)} · ${t.conversions} conv.`),
+        el('div', { style: 'color:var(--text-dim); font-size:12px;' }, `ROAS ${roasLabel(t.spend, t.roas)} · CTR ${pct(t.ctr)} · ${t.conversions} conv. · Beneficio ${profitLabel(t.revenue, t.spend)}`),
       ]),
       el('div', { style: 'font-weight:700; font-size:17px;' }, num(t.score)),
     ]));
@@ -228,7 +233,7 @@ function renderCampaigns() {
   }
   const table = el('table');
   table.appendChild(el('thead', {}, el('tr', {}, [
-    'Equipo', 'Campaña', 'Objetivo', 'Estrategia', 'Estado', 'Gasto / Presup.', 'Impr.', 'Clics', 'Conv.', 'CTR', 'ROAS',
+    'Equipo', 'Campaña', 'Objetivo', 'Estrategia', 'Estado', 'Gasto / Presup.', 'Impr.', 'Clics', 'Conv.', 'CTR', 'Ingresos', 'ROAS', 'Beneficio',
   ].map((h) => el('th', {}, h)))));
   const tbody = el('tbody');
   campaigns.forEach((c) => {
@@ -246,7 +251,9 @@ function renderCampaigns() {
       el('td', {}, num(c.metrics.clicks)),
       el('td', {}, num(c.metrics.conversions)),
       el('td', {}, pct(ctr)),
-      el('td', {}, num(roas)),
+      el('td', {}, euros(c.metrics.revenue)),
+      el('td', {}, roasLabel(c.metrics.spend, roas)),
+      el('td', { class: profitClass(c.metrics.revenue, c.metrics.spend) }, profitLabel(c.metrics.revenue, c.metrics.spend)),
     ]));
   });
   table.appendChild(tbody);
@@ -265,11 +272,18 @@ function renderTeams() {
   const grid = el('div', { class: 'grid grid-cols-4' });
   teams.forEach((t) => {
     const spentPct = t.budgetInitial > 0 ? Math.min(100, (t.budgetSpent / t.budgetInitial) * 100) : 0;
+    const ranked = (state.ranking || []).find((r) => r.teamId === t.id);
     const card = el('div', { class: 'card tight metric-card' });
     card.appendChild(el('div', { class: 'label' }, t.name));
     card.appendChild(el('div', { class: 'value', style: 'font-size:19px;' }, `${euros(t.budgetInitial - t.budgetSpent)} restante`));
     card.appendChild(el('div', { class: 'progress-bar' }, el('div', { style: `width:${spentPct}%;` })));
     card.appendChild(el('div', { class: 'sub' }, `Gastado ${euros(t.budgetSpent)} de ${euros(t.budgetInitial)}`));
+    if (ranked) {
+      card.appendChild(el('div', { class: 'sub', style: 'margin-top:4px;' }, [
+        'ROAS ', roasLabel(ranked.spend, ranked.roas), ' · Beneficio ',
+        el('span', { class: profitClass(ranked.revenue, ranked.spend) }, profitLabel(ranked.revenue, ranked.spend)),
+      ]));
+    }
     grid.appendChild(card);
   });
   container.appendChild(grid);

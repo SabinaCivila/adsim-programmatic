@@ -9,7 +9,9 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "dev": "node server/index.js",
+    "test": "node --test test/gameEngine.test.js",
+    "test:ui": "node test/ui-persistence.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",
